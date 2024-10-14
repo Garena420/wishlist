@@ -1,6 +1,7 @@
 import change_wishlist_pb2
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
+import wishlist_pb2
 import base64
 import json
 import requests
@@ -86,7 +87,48 @@ def make_request(region, encrypted, token):
     response = requests.post(url, data=body, headers=headers)
     if response.status_code != 200:
         raise Exception("Request failed from official api" + response.text)
-    return "Request Successfull"
+    return response
+
+def hex_to_binary(hex_string):
+    return bytes.fromhex(hex_string)
+
+def decode_protobuf(binary_data):
+    items = wishlist_pb2.Items()
+    items.ParseFromString(binary_data)
+    return items
+
+def items_to_json(items):
+    items_json = {
+        "items": []
+    }
+    for item in items.items:
+        items_json["items"].append({
+            "itemId": item.itemId,
+            "releaseTime": str(item.releaseTime)
+        })
+    return items_json
+
+def decode_protobuf_to_json(binary_data: bytes) -> str:
+    binary_data = hex_to_binary(binary_data)
+    decoded_items = decode_protobuf(binary_data)
+    items_json = items_to_json(decoded_items)
+    return (json.dumps(items_json, indent=2))
+    
+def respons(item_id, uid, password, mode, hex_type):
+    encrypted_payload = payload(item_id, mode, hex_type)
+    data = jwt(uid, password)
+    token = data.get("token")
+    if not token:
+        raise Exception("Token not found in response")
+    decoded_payload = data.get('decoded_payload', {})
+    region = decoded_payload.get('lock_region')
+    res = make_request(region, encrypted_payload, token)
+    if isinstance(res, dict) and 'error' in res:
+        return jsonify(res), 500
+
+    binary_data = res.content.hex()
+    json_output = decode_protobuf_to_json(binary_data)
+    return json_output
 
 @app.route("/add_item", methods=["GET"])
 def add_item():
@@ -100,16 +142,8 @@ def add_item():
     	hex_type = "1"
     else:
     	hex_type = "2"
-    encrypted_payload = payload(item_id, mode, hex_type)
-    data = jwt(uid, password)
-    token = data.get("token")
-    if not token:
-        raise Exception("Token not found in response")
-    decoded_payload = data.get('decoded_payload', {})
-    region = decoded_payload.get('lock_region')
-    print(encrypted_payload)
-    response_data = make_request(region, encrypted_payload, token)
-    return jsonify({"Response": response_data}), 200
+    las = respons(item_id, uid, password, mode, hex_type)
+    return las, 200
         
 @app.route("/remove_item", methods=["GET"])
 def remove_item():
@@ -123,16 +157,8 @@ def remove_item():
     	hex_type = "1"
     else:
     	hex_type = "2"
-    encrypted_payload = payload(item_id, mode, hex_type)
-    data = jwt(uid, password)
-    token = data.get("token")
-    if not token:
-        raise Exception("Token not found in response")
-    decoded_payload = data.get('decoded_payload', {})
-    region = decoded_payload.get('lock_region')
-    print(encrypted_payload)
-    response_data = make_request(region, encrypted_payload, token)
-    return jsonify({"Response": response_data}), 200
+    las = respons(item_id, uid, password, mode, hex_type)
+    return las, 200
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8080, debug=True)
